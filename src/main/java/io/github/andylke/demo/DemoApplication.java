@@ -3,17 +3,16 @@ package io.github.andylke.demo;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
-import javax.crypto.KeyGenerator;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.bouncycastle.pqc.math.linearalgebra.ByteUtils;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -28,62 +27,69 @@ public class DemoApplication {
 
   @EventListener(ApplicationReadyEvent.class)
   void ready() throws Exception {
-    encrypt(generateSecretKey(128));
-    encrypt(generateSecretKey(192));
-    encrypt(generateSecretKey(256));
+    final String clearHexString =
+        "f0f8f1f0e2e2f8f6f9f0f4404040404040404040404040404040f0f0c5e3d7d4c2e240404040404040404040404040404040404040404040404040404040404040404040404040404040f3f5c5d54040f0f0f0f0f1e3c3c8c3f2f9f5404040404040404040404040404040404040404040404040404040404040404040c940404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040f0f0f0f0f0f0f0f0f040404040404040404040404040404040f0f2f0d5c6f0f0f0f160f0f160f0f160f0f04bf0f04bf0f04bf0f0f0f0f0f04040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040e2c74040404040404040404040f0f0f0f0f0f0f0f0f0404040404040404040404040404040404040e3c3c8c3f2f9f5404040";
+    final SecretKey secretKeySpec =
+        secretKeySpec("2c10253c02052e0331692e4a204b704204135c1e30336f6d13026f00604b0072");
 
-    encrypt(secretKeySpec("1234567890123456"));
-    encrypt(secretKeySpec("123456789012345678901234"));
-    encrypt(secretKeySpec("12345678901234567890123456789012"));
+    final String encryptedHexString =
+        encrypt(secretKeySpec, ivParameterSpec("f0f0f0f0f04040404040404040404040"), clearHexString);
+
+    final String ivHexString =
+        encrypt(
+            secretKeySpec, new IvParameterSpec(new byte[16]), "f0f0f0f0f04040404040404040404040");
+    final byte[] ivHexBytes = ByteUtils.fromHexString(ivHexString);
+    final byte[] ivHex16Bytes = new byte[16];
+    System.arraycopy(ivHexBytes, 0, ivHex16Bytes, 0, 16);
+    IvParameterSpec ivParameterSPec = ivParameterSpec(ByteUtils.toHexString(ivHex16Bytes));
+
+    decrypt(secretKeySpec, ivParameterSPec, encryptedHexString);
   }
 
-  private SecretKey secretKeySpec(final String secretKeyString) {
-    final byte[] secretKeyBytes = secretKeyString.getBytes();
-
-    final SecretKey secretKey = new SecretKeySpec(secretKeyBytes, "AES");
-
-    String base64String = Base64.getEncoder().encodeToString(secretKeyBytes);
-    System.out.println(
-        "Custom secretKey base64String=["
-            + base64String
-            + "], length=["
-            + secretKeyBytes.length
-            + "]");
-
-    return secretKey;
+  private SecretKey secretKeySpec(final String secretKeyHexString) {
+    final byte[] secretKeyBytes = ByteUtils.fromHexString(secretKeyHexString);
+    return new SecretKeySpec(secretKeyBytes, "AES");
   }
 
-  private SecretKey generateSecretKey(final int keySize) throws NoSuchAlgorithmException {
-    final KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
-    keyGenerator.init(keySize);
-    final SecretKey secretKey = keyGenerator.generateKey();
+  private IvParameterSpec ivParameterSpec(String ivParameterSpecHexString) {
+    final byte[] ivParameterBytes = ByteUtils.fromHexString(ivParameterSpecHexString);
 
-    final byte[] secretKeyBytes = secretKey.getEncoded();
-
-    String base64String = Base64.getEncoder().encodeToString(secretKeyBytes);
-    System.out.println(
-        "Generated secretKey base64String=["
-            + base64String
-            + "], length=["
-            + secretKeyBytes.length
-            + "] using keySize=["
-            + keySize
-            + "]");
-
-    return secretKey;
+    return new IvParameterSpec(ivParameterBytes);
   }
 
-  private void encrypt(final SecretKey secretKey)
+  private String encrypt(
+      final SecretKey secretKey,
+      final IvParameterSpec ivParameterSpec,
+      final String clearContentHexString)
       throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
           InvalidAlgorithmParameterException, IllegalBlockSizeException, BadPaddingException {
-    // Encrypt Hello world message
-    Cipher encryptionCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-    IvParameterSpec parameterSpec = new IvParameterSpec(new byte[16]);
-    encryptionCipher.init(Cipher.ENCRYPT_MODE, secretKey, parameterSpec);
-    String message = "Hello world";
+    final Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+    cipher.init(Cipher.ENCRYPT_MODE, secretKey, ivParameterSpec);
 
-    byte[] encryptedMessageBytes = encryptionCipher.doFinal(message.getBytes());
-    String encryptedMessage = Base64.getEncoder().encodeToString(encryptedMessageBytes);
-    System.out.println("Encrypted message = " + encryptedMessage);
+    final byte[] clearContentBytes = ByteUtils.fromHexString(clearContentHexString);
+    byte[] encryptedBytes = cipher.doFinal(clearContentBytes);
+    String encryptedHexString = ByteUtils.toHexString(encryptedBytes);
+    System.out.println("Encrypt IV = " + ByteUtils.toHexString(ivParameterSpec.getIV()));
+    System.out.println("Encrypted = " + encryptedHexString);
+
+    return encryptedHexString;
+  }
+
+  private String decrypt(
+      final SecretKey secretKey,
+      final IvParameterSpec ivParameterSpec,
+      final String encryptedHexString)
+      throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
+          InvalidAlgorithmParameterException, IllegalBlockSizeException, BadPaddingException {
+    final Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+    cipher.init(Cipher.DECRYPT_MODE, secretKey, ivParameterSpec);
+
+    final byte[] encryptedBytes = ByteUtils.fromHexString(encryptedHexString);
+    byte[] decryptedBytes = cipher.doFinal(encryptedBytes);
+    String decryptedHexString = ByteUtils.toHexString(decryptedBytes);
+    System.out.println("Decrypt IV = " + ByteUtils.toHexString(ivParameterSpec.getIV()));
+    System.out.println("Decrypted = " + decryptedHexString);
+
+    return decryptedHexString;
   }
 }
